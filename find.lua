@@ -2,7 +2,12 @@ local ffi = require 'ffi'
 
 find = {}
 find.__index = find
---find.verbose=true
+
+-- default is to get verbose on errors
+find.verbose=false
+find.verboseError=true
+find.verboseFallback=true
+
 -- constants to index array tables below
 local Fwd, BwdFilter, BwdData = 1, 2, 3
 
@@ -64,23 +69,19 @@ local bwdDataAlgoNames = {
 
 local algoNames = {fwdAlgoNames, bwdFilterAlgoNames, bwdDataAlgoNames}
 
-local function verboseCall(layer, f, ...)
-   if find.verbose then
-        print("find:verboseCall: calling " .. f .. ", hash: ",  layer.autotunerHash)
+local function convDataString(layer)
+   local info = ''
+   if layer.convDescData then
+      local desc = layer.convDescData
+      info = ' convDesc=[mode : ' .. desc.mode .. ' datatype : ' .. desc.dataType .. ']'
    end
+   return info .. ' hash=' ..  layer.autotunerHash
+end
+
+local function verboseCall(layer, f, ...)
    local status = cudnn.call(f, ...)
    if (status ~= ffi.C.CUDNN_STATUS_SUCCESS) and (find.verbose or find.verboseError) then
-      local prefix = "find:verboseCall:"
-      print( prefix .. f .. " failed: ", tonumber(status))
-      if layer.convDesc then
-         local desc = layer.convDescData
-         if desc then
-            print (prefix .. ' conv desc mode : ', desc.mode, ' datatype : ', desc.datatype)
-         end
-      end
-   end
-   if find.verbose then
-      print("find:verboseCall: success, " .. f )
+      print("\n" .. f .. " failed: ", tonumber(status), convDataString(layer))
    end
    return status
 end
@@ -92,12 +93,13 @@ local function checkedCall(layer, f, ...)
       local str = ffi.string(cudnn.C.cudnnGetErrorString(status))
       error('Error in CuDNN: ' .. str .. ' ('..f..')')
    end
+   return status
 end
 find.checkedCall = checkedCall
 
 local function noFallback(layer)
-   if find.verbose then
-      print("find.defaultFallback: verboseCall failed for:  ", layer.autotunerHash)
+   if find.verbose or find.verboseFallback then
+      print("\nfind.defaultFallback: verboseCall failed for:  ", convDataString(layer))
    end
    return false
 end
@@ -105,14 +107,14 @@ end
 local function defaultFallback(layer, replay)
    -- read conv descriptor
    local convDescData = layer.convDescData
-
    if convDescData and convDescData.dataType == "CUDNN_DATA_HALF" then
-      if find.verbose then
+      if find.verbose or find.verboseFallback then
          if replay then
-            print("find.defaultFallback: replay for ", layer.autotunerHash)
+            print("\nfind.defaultFallback: replay for ", convDataString(layer))
          else
-            print("find.defaultFallback: no 16-bit float algo found, will try 32 bits for ", layer.autotunerHash)
+            print("\nfind.defaultFallback: no 16-bit float algo found, will try 32 bits for ", convDataString(layer))
          end
+         print("[ *** Set find.verboseFallback to false to disable this message *** ]")
       end
       -- update our record with fallback value
       convDescData.dataType = ffi.C.CUDNN_DATA_FLOAT
@@ -408,9 +410,9 @@ function find:setupAlgo(layer, findAPI_idx, algSearchMode, params)
                        if (useFallback) then fallback = "[FALLBACK]"  end
                        print(string.format(
                                 "\n" .. API .. " algo: %s (%d, status: %d), memory: %8d, count: %d"
-                                   .. " hash: %45s " .. cacheHit .. fallback,
+                                   .. " hash: %s " .. cacheHit .. fallback,
                                 algoNames[findAPI_idx][cachedAlgo[validResults].algo+1], cachedAlgo[validResults].algo,  cachedAlgo[validResults].status,
-                                cachedAlgo[validResults].memory, r, layer.autotunerHash))
+                                cachedAlgo[validResults].memory, r, convDataString(layer)))
                     end
                  end
               end
@@ -430,7 +432,7 @@ function find:setupAlgo(layer, findAPI_idx, algSearchMode, params)
               end
               -- check again
               if status ~= 0  or validResults < 1 then
-                 error (API .. ' failed, sizes: ' .. layer.autotunerHash)
+                 error (API .. ' failed, sizes: ' .. convDataString(layer))
               end
            end
            self:store(layer, findAPI_idx, cachedAlgo)
@@ -454,9 +456,9 @@ function find:setupAlgo(layer, findAPI_idx, algSearchMode, params)
            local fallback = ""
            if (useFallback) then fallback = "[FALLBACK]"  end
            print(string.format(
-                    "\n" .. API  .. ": %s(%d)[%d of %d] Workspace: %8fM (current ws size %fM, max: %dM free: %dM)  hash: %45s" .. cacheHit .. fallback,
+                    "\n" .. API  .. ": %s(%d)[%d of %d] Workspace: %8fM (current ws size %fM, max: %dM free: %dM)  hash: %s" .. cacheHit .. fallback,
                     algoNames[findAPI_idx][cachedAlgo[retAlgo].algo+1], cachedAlgo[retAlgo].algo, retAlgo, #cachedAlgo,
-                    tonumber(cachedAlgo[retAlgo].memory)/Meg, curWorkspaceSize/Meg, self.maxWorkspaceSize/Meg, freeMemory/Meg, layer.autotunerHash))
+                    tonumber(cachedAlgo[retAlgo].memory)/Meg, curWorkspaceSize/Meg, self.maxWorkspaceSize/Meg, freeMemory/Meg, convDataString(layer)))
         end
         return cachedAlgo[retAlgo].algo
 end
