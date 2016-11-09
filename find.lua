@@ -422,6 +422,27 @@ function find:setupAlgo(layer, findAPI_idx, algSearchMode, params)
               return 0
            end
 
+
+           local function performanceFallback(layer)
+              -- read conv descriptor
+              local convDescData = layer.convDescData
+              local nativeResults=cachedAlgo
+              if convDescData and convDescData.dataType == "CUDNN_DATA_HALF" then
+                 if find.verbose or find.verboseFallback then
+                    print("\nfind.performanceFallback: will try 32 bits for ", convDataString(layer))
+                    print("[ *** Set find.verboseFallback to false to disable this message *** ]")
+                 end
+                 -- update our record with fallback value
+                 convDescData.dataType = ffi.C.CUDNN_DATA_FLOAT
+                 -- update the descriptor in CUDNN
+                 cudnn.setConvolutionDescriptor(convDescData, layer.convDesc);
+                 -- do the actual call
+                 local status = callCudnn(layer)
+                 -- check if we got better results
+
+                 -- restore if we didn't
+           end
+
            -- do the actual call
            local status = callCudnn(layer)
 
@@ -434,6 +455,9 @@ function find:setupAlgo(layer, findAPI_idx, algSearchMode, params)
               if status ~= 0  or validResults < 1 then
                  error (API .. ' failed, sizes: ' .. convDataString(layer))
               end
+           else
+              -- if we are running in native fp16, check if this algo is actiually faster in pseudo
+              checkFasterPseudo(layer)
            end
            self:store(layer, findAPI_idx, cachedAlgo)
            -- restore WS size if we fiddled with it
