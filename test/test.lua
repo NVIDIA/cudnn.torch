@@ -940,7 +940,7 @@ mytester:add(cudnntest)
 
 cudnn.verbose=false
 cudnn.find.verbose=false
-cudnn.find.verboseFallback=false
+-- cudnn.find.verboseFallback=false
 cudnn.useFindEx=false
 
 for i = 1, 1 do -- cutorch.getDeviceCount() do
